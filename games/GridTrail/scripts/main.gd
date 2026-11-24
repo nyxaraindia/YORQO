@@ -2,7 +2,7 @@
 extends Control
 
 # =========================================================
-# GRIDTRAIL - 100 LEVEL NUMBER PATH PUZZLE
+# GRIDTRAIL - 100 LEVEL PUZZLE GAME
 # =========================================================
 
 const TOTAL_LEVELS = 100
@@ -13,10 +13,10 @@ const EMPTY_COLOR = Color("#272a3c")
 const PATH_COLOR = Color("#7545d6")
 const START_COLOR = Color("#087f5b")
 const FINISH_COLOR = Color("#087ca5")
-const CHECKPOINT_COLOR = Color("#39435e")
 const OBSTACLE_COLOR = Color("#11131b")
 const WHITE = Color("#ffffff")
 const MUTED = Color("#aaa6c2")
+const GOLD = Color("#f5c451")
 
 var current_level = 1
 var unlocked_level = 1
@@ -29,10 +29,7 @@ var route = []
 var playable_path = []
 var path = []
 
-# Cell index -> checkpoint number
 var number_positions = {}
-
-# Cell index -> true
 var obstacle_cells = {}
 
 var tiles = []
@@ -40,6 +37,17 @@ var board: GridContainer
 
 var status_label: Label
 var progress_label: Label
+var timer_label: Label
+
+# Stopwatch
+var elapsed_time = 0.0
+var timer_running = false
+var best_time = -1.0
+
+# Player statistics
+var move_count = 0
+var completed_stars = 0
+var new_record = false
 
 var next_number = 2
 var dragging = false
@@ -61,18 +69,69 @@ func _ready():
 
 
 # =========================================================
+# STOPWATCH UPDATE
+# =========================================================
+
+func _process(delta):
+	if timer_running and not completed:
+		elapsed_time += delta
+		update_timer_display()
+
+
+func format_time(seconds: float) -> String:
+	var total_seconds = int(seconds)
+	var minutes = int(total_seconds / 60)
+	var remaining_seconds = total_seconds % 60
+
+	var milliseconds = int(
+		(seconds - float(total_seconds)) * 100
+	)
+
+	return "%02d:%02d.%02d" % [
+		minutes,
+		remaining_seconds,
+		milliseconds
+	]
+
+
+func update_timer_display():
+	if timer_label == null:
+		return
+
+	var best_text = "--:--.--"
+
+	if best_time >= 0:
+		best_text = format_time(best_time)
+
+	timer_label.text = "TIME  %s     BEST  %s" % [
+		format_time(elapsed_time),
+		best_text
+	]
+
+
+# =========================================================
 # SAVE AND LOAD
 # =========================================================
 
 func load_progress():
-	var result = save_file.load("user://gridtrail_progress.cfg")
+	var result = save_file.load(
+        "user://gridtrail_progress.cfg"
+	)
 
 	if result == OK:
 		unlocked_level = int(
-			save_file.get_value("progress", "unlocked_level", 1)
+			save_file.get_value(
+				"progress",
+				"unlocked_level",
+				1
+			)
 		)
 
-	unlocked_level = clampi(unlocked_level, 1, TOTAL_LEVELS)
+	unlocked_level = clampi(
+		unlocked_level,
+		1,
+		TOTAL_LEVELS
+	)
 
 
 func save_progress():
@@ -82,7 +141,31 @@ func save_progress():
 		unlocked_level
 	)
 
-	save_file.save("user://gridtrail_progress.cfg")
+	save_file.save(
+        "user://gridtrail_progress.cfg"
+	)
+
+
+func load_best_time(level: int) -> float:
+	return float(
+		save_file.get_value(
+			"records",
+			str(level),
+			-1.0
+		)
+	)
+
+
+func save_best_time(level: int, seconds: float):
+	save_file.set_value(
+		"records",
+		str(level),
+		seconds
+	)
+
+	save_file.save(
+        "user://gridtrail_progress.cfg"
+	)
 
 
 # =========================================================
@@ -96,17 +179,23 @@ func clear_screen():
 
 	tiles.clear()
 	board = null
+
 	status_label = null
 	progress_label = null
+	timer_label = null
 
 
 func create_background():
 	var background = ColorRect.new()
+
 	background.color = BG_COLOR
+
 	background.set_anchors_and_offsets_preset(
 		Control.PRESET_FULL_RECT
 	)
+
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
+
 	add_child(background)
 
 
@@ -165,31 +254,34 @@ func create_button(
 		WHITE
 	)
 
-	button.add_theme_color_override(
-		"font_hover_color",
-		WHITE
-	)
-
-	button.add_theme_color_override(
-		"font_pressed_color",
-		WHITE
-	)
-
 	var normal = StyleBoxFlat.new()
+
 	normal.bg_color = Color("#272a3c")
 	normal.set_corner_radius_all(10)
 	normal.set_border_width_all(1)
 	normal.border_color = Color("#55516e")
 
 	var hover = StyleBoxFlat.new()
+
 	hover.bg_color = Color("#40345e")
 	hover.set_corner_radius_all(10)
 	hover.set_border_width_all(1)
 	hover.border_color = Color("#9972e8")
 
-	button.add_theme_stylebox_override("normal", normal)
-	button.add_theme_stylebox_override("hover", hover)
-	button.add_theme_stylebox_override("pressed", hover)
+	button.add_theme_stylebox_override(
+		"normal",
+		normal
+	)
+
+	button.add_theme_stylebox_override(
+		"hover",
+		hover
+	)
+
+	button.add_theme_stylebox_override(
+		"pressed",
+		hover
+	)
 
 	add_child(button)
 
@@ -240,10 +332,15 @@ func show_main_menu():
 		20
 	)
 
-	levels_button.pressed.connect(show_level_select)
+	levels_button.pressed.connect(
+		show_level_select
+	)
 
 	create_label(
-		"UNLOCKED: %d / %d" % [unlocked_level, TOTAL_LEVELS],
+		"UNLOCKED: %d / %d" % [
+			unlocked_level,
+			TOTAL_LEVELS
+		],
 		Vector2(0, screen.y * 0.48 + 155),
 		Vector2(screen.x, 35),
 		16,
@@ -252,7 +349,7 @@ func show_main_menu():
 
 
 # =========================================================
-# LEVEL SELECTION
+# LEVEL SELECT
 # =========================================================
 
 func show_level_select():
@@ -272,7 +369,11 @@ func show_level_select():
 	var button_size = 48
 	var gap = 10
 
-	var total_width = columns * button_size + (columns - 1) * gap
+	var total_width = (
+		columns * button_size +
+		(columns - 1) * gap
+	)
+
 	var start_x = (screen.x - total_width) / 2
 	var start_y = 120
 
@@ -294,7 +395,9 @@ func show_level_select():
 		)
 
 		if level <= unlocked_level:
+
 			level_button.disabled = false
+
 			level_button.pressed.connect(
 				start_level.bind(level)
 			)
@@ -303,6 +406,7 @@ func show_level_select():
 				level_button.modulate = Color("#b99aff")
 
 		else:
+
 			level_button.disabled = true
 			level_button.modulate = Color("#555566")
 
@@ -313,7 +417,9 @@ func show_level_select():
 		18
 	)
 
-	back_button.pressed.connect(show_main_menu)
+	back_button.pressed.connect(
+		show_main_menu
+	)
 
 
 # =========================================================
@@ -322,26 +428,33 @@ func show_level_select():
 
 func configure_level(level: int):
 	var stage = int((level - 1) / LEVELS_PER_STAGE)
+
 	var local_level = (level - 1) % LEVELS_PER_STAGE
 
 	grid_size = 5 + stage
 
-	checkpoint_count = min(5 + stage, 9)
+	checkpoint_count = mini(
+		5 + stage,
+		9
+	)
 
 	obstacle_count = int(
 		round(
-			float(local_level) / 19.0 * (grid_size - 3)
+			float(local_level) / 19.0 *
+			float(grid_size - 3)
 		)
 	)
 
-	# Updated tile size formula
+	# UPDATED TILE SIZE FORMULA
 	tile_size = 72 - (stage * 7)
 
 	tile_gap = 6
 
 
 func get_difficulty_name() -> String:
-	var stage = int((current_level - 1) / LEVELS_PER_STAGE)
+	var stage = int(
+		(current_level - 1) / LEVELS_PER_STAGE
+	)
 
 	match stage:
 		0:
@@ -359,48 +472,56 @@ func get_difficulty_name() -> String:
 
 
 # =========================================================
-# LEVEL GENERATION
+# GENERATE LEVEL
 # =========================================================
 
 func generate_level():
 	route.clear()
 	playable_path.clear()
+
 	number_positions.clear()
 	obstacle_cells.clear()
 
-	# Generate a snake-shaped route through the grid.
-	# Every cell is included exactly once.
+	# Create snake route.
 
 	for row in range(grid_size):
 
 		if row % 2 == 0:
 
 			for column in range(grid_size):
-				route.append(row * grid_size + column)
+				route.append(
+					row * grid_size + column
+				)
 
 		else:
 
 			for column in range(grid_size - 1, -1, -1):
-				route.append(row * grid_size + column)
+				route.append(
+					row * grid_size + column
+				)
 
 	var total_cells = grid_size * grid_size
 
-	var playable_count = total_cells - obstacle_count
+	var playable_count = (
+		total_cells - obstacle_count
+	)
 
-	# The playable route is the beginning of the snake route.
-	# The remaining cells become obstacles.
+	# Playable cells.
 
 	for i in range(playable_count):
 		playable_path.append(route[i])
 
+	# Obstacles.
+
 	for i in range(playable_count, total_cells):
 		obstacle_cells[route[i]] = true
 
-	# Assign checkpoint numbers to playable cells.
-	# The first checkpoint is at the beginning.
-	# The last checkpoint is at the end.
+	# Place checkpoints.
 
-	for number in range(1, checkpoint_count + 1):
+	for number in range(
+		1,
+		checkpoint_count + 1
+	):
 
 		var checkpoint_index = int(
 			round(
@@ -410,16 +531,19 @@ func generate_level():
 			)
 		)
 
-		var cell_index = playable_path[checkpoint_index]
+		var cell_index = playable_path[
+			checkpoint_index
+		]
 
 		number_positions[cell_index] = number
 
 
 # =========================================================
-# START A LEVEL
+# START LEVEL
 # =========================================================
 
 func start_level(level: int):
+
 	if level < 1 or level > TOTAL_LEVELS:
 		return
 
@@ -434,8 +558,18 @@ func start_level(level: int):
 	path.clear()
 
 	next_number = 2
+
 	dragging = false
 	completed = false
+
+	elapsed_time = 0.0
+	timer_running = false
+
+	move_count = 0
+	completed_stars = 0
+	new_record = false
+
+	best_time = load_best_time(current_level)
 
 	show_game_screen()
 
@@ -480,9 +614,19 @@ func show_game_screen():
 		"",
 		Vector2(0, 118),
 		Vector2(screen.x, 28),
-		15,
+		14,
 		MUTED
 	)
+
+	timer_label = create_label(
+		"",
+		Vector2(0, 145),
+		Vector2(screen.x, 28),
+		16,
+		WHITE
+	)
+
+	update_timer_display()
 
 	create_board()
 
@@ -495,7 +639,9 @@ func show_game_screen():
 		15
 	)
 
-	undo_button.pressed.connect(undo_move)
+	undo_button.pressed.connect(
+		undo_move
+	)
 
 	var restart_button = create_button(
 		"RESTART",
@@ -504,7 +650,9 @@ func show_game_screen():
 		15
 	)
 
-	restart_button.pressed.connect(restart_game)
+	restart_button.pressed.connect(
+		restart_game
+	)
 
 	var levels_button = create_button(
 		"LEVELS",
@@ -513,19 +661,23 @@ func show_game_screen():
 		15
 	)
 
-	levels_button.pressed.connect(show_level_select)
+	levels_button.pressed.connect(
+		show_level_select
+	)
 
 	update_progress()
 
 
 # =========================================================
-# CREATE GRID
+# CREATE BOARD
 # =========================================================
 
 func create_board():
+
 	board = GridContainer.new()
 
 	board.columns = grid_size
+
 	board.add_theme_constant_override(
 		"h_separation",
 		tile_gap
@@ -570,7 +722,10 @@ func create_board():
 
 		tile.add_theme_font_size_override(
 			"font_size",
-			maxi(14, int(tile_size * 0.35))
+			maxi(
+				14,
+				int(tile_size * 0.35)
+			)
 		)
 
 		tile.add_theme_color_override(
@@ -590,10 +745,15 @@ func create_board():
 
 		else:
 
-			# Display the checkpoint number immediately.
-			tile.text = str(get_number(index)) if get_number(index) > 0 else ""
+			var checkpoint = get_number(index)
+
+			if checkpoint > 0:
+				tile.text = str(checkpoint)
+			else:
+				tile.text = ""
 
 		board.add_child(tile)
+
 		tiles.append(tile)
 
 		update_tile(index)
@@ -602,10 +762,11 @@ func create_board():
 
 
 # =========================================================
-# CHECKPOINT NUMBER LOOKUP
+# GET CHECKPOINT NUMBER
 # =========================================================
 
 func get_number(index: int) -> int:
+
 	if number_positions.has(index):
 		return int(number_positions[index])
 
@@ -637,6 +798,7 @@ func _input(event):
 					try_add_cell(index)
 
 			else:
+
 				dragging = false
 
 	elif event is InputEventMouseMotion:
@@ -664,6 +826,7 @@ func _input(event):
 				try_add_cell(index)
 
 		else:
+
 			dragging = false
 
 	elif event is InputEventScreenDrag:
@@ -691,7 +854,7 @@ func get_tile_at_position(position: Vector2) -> int:
 
 
 # =========================================================
-# ADD A CELL TO THE PATH
+# ADD CELL TO PATH
 # =========================================================
 
 func try_add_cell(index: int):
@@ -702,15 +865,18 @@ func try_add_cell(index: int):
 	if index < 0 or index >= tiles.size():
 		return
 
-	# Obstacles cannot be used.
+	# Obstacles cannot be selected.
+
 	if obstacle_cells.has(index):
 		return
 
-	# A cell cannot be visited twice.
+	# Do not revisit cells.
+
 	if path.has(index):
 		return
 
-	# The first cell must be checkpoint 1.
+	# First cell must be number 1.
+
 	if path.is_empty():
 
 		if get_number(index) != 1:
@@ -718,18 +884,26 @@ func try_add_cell(index: int):
 
 		path.append(index)
 
+		timer_running = true
+		move_count += 1
+
 		update_all_tiles()
 		update_progress()
+		update_timer_display()
 
 		return
 
-	var previous_cell = path[path.size() - 1]
+	var previous_cell = path[
+		path.size() - 1
+	]
 
-	# Only up, down, left and right are allowed.
+	# Only four-direction movement.
+
 	if not is_adjacent(previous_cell, index):
 		return
 
-	# Checkpoint numbers must be visited in order.
+	# Checkpoint order.
+
 	var checkpoint = get_number(index)
 
 	if checkpoint > 0:
@@ -741,14 +915,17 @@ func try_add_cell(index: int):
 
 	path.append(index)
 
+	move_count += 1
+
 	update_all_tiles()
 	update_progress()
+	update_timer_display()
 
 	check_completion()
 
 
 # =========================================================
-# ADJACENT MOVEMENT
+# FOUR-DIRECTION MOVEMENT
 # =========================================================
 
 func is_adjacent(a: int, b: int) -> bool:
@@ -766,7 +943,7 @@ func is_adjacent(a: int, b: int) -> bool:
 
 
 # =========================================================
-# UPDATE TILE COLORS
+# TILE STYLING
 # =========================================================
 
 func make_tile_style(color: Color) -> StyleBoxFlat:
@@ -789,6 +966,7 @@ func update_tile(index: int):
 	if obstacle_cells.has(index):
 
 		tile.text = "X"
+
 		tile.add_theme_stylebox_override(
 			"normal",
 			make_tile_style(OBSTACLE_COLOR)
@@ -798,7 +976,8 @@ func update_tile(index: int):
 
 	var checkpoint = get_number(index)
 
-	# Always show checkpoint numbers.
+	# Always display checkpoint numbers.
+
 	if checkpoint > 0:
 		tile.text = str(checkpoint)
 	else:
@@ -825,12 +1004,16 @@ func update_tile(index: int):
 
 	tile.add_theme_stylebox_override(
 		"hover",
-		make_tile_style(color.lightened(0.15))
+		make_tile_style(
+			color.lightened(0.15)
+		)
 	)
 
 	tile.add_theme_stylebox_override(
 		"pressed",
-		make_tile_style(color.darkened(0.15))
+		make_tile_style(
+			color.darkened(0.15)
+		)
 	)
 
 
@@ -841,7 +1024,7 @@ func update_all_tiles():
 
 
 # =========================================================
-# PROGRESS
+# PLAYER PROGRESS
 # =========================================================
 
 func update_progress():
@@ -849,9 +1032,12 @@ func update_progress():
 	if progress_label == null:
 		return
 
-	progress_label.text = "FILLED: %d / %d     NEXT: %d" % [
+	progress_label.text = (
+        "FILLED: %d / %d     MOVES: %d     NEXT: %d"
+	) % [
 		path.size(),
 		playable_path.size(),
+		move_count,
 		next_number
 	]
 
@@ -863,21 +1049,65 @@ func update_status(message: String):
 
 
 # =========================================================
-# COMPLETION CHECK
+# STAR RATING
+# =========================================================
+
+func calculate_stars() -> int:
+
+	var allowed_three_star_time = (
+		playable_path.size() * 2.0
+	)
+
+	var allowed_two_star_time = (
+		playable_path.size() * 4.0
+	)
+
+	if elapsed_time <= allowed_three_star_time:
+		return 3
+
+	elif elapsed_time <= allowed_two_star_time:
+		return 2
+
+	return 1
+
+
+# =========================================================
+# CHECK COMPLETION
 # =========================================================
 
 func check_completion():
 
+	# Every playable square must be filled.
+
 	if path.size() != playable_path.size():
 		return
+
+	# All checkpoints must be completed.
 
 	if next_number <= checkpoint_count:
 		return
 
 	completed = true
 	dragging = false
+	timer_running = false
 
-	update_status("LEVEL COMPLETED!")
+	completed_stars = calculate_stars()
+
+	new_record = false
+
+	# Save personal best.
+
+	if best_time < 0 or elapsed_time < best_time:
+
+		best_time = elapsed_time
+		new_record = true
+
+		save_best_time(
+			current_level,
+			best_time
+		)
+
+	# Unlock the next level.
 
 	if current_level < TOTAL_LEVELS:
 
@@ -886,16 +1116,43 @@ func check_completion():
 
 		save_progress()
 
+	var message = "LEVEL COMPLETED!"
+
+	update_status(message)
+	update_timer_display()
+
 	show_completion_buttons()
 
 
 # =========================================================
-# COMPLETION SCREEN BUTTONS
+# COMPLETION BUTTONS
 # =========================================================
 
 func show_completion_buttons():
 
 	var screen = get_viewport_rect().size
+
+	var stars_text = ""
+
+	for i in range(completed_stars):
+		stars_text += "★ "
+
+	var result_text = "%s\nTIME: %s\nMOVES: %d" % [
+		stars_text,
+		format_time(elapsed_time),
+		move_count
+	]
+
+	if new_record:
+		result_text += "\nNEW PERSONAL BEST!"
+
+	create_label(
+		result_text,
+		Vector2(0, screen.y - 230),
+		Vector2(screen.x, 100),
+		20,
+		GOLD
+	)
 
 	var next_button = create_button(
 		"NEXT LEVEL",
@@ -906,12 +1163,17 @@ func show_completion_buttons():
 
 	if current_level < TOTAL_LEVELS:
 
-		next_button.pressed.connect(go_to_next_level)
+		next_button.pressed.connect(
+			go_to_next_level
+		)
 
 	else:
 
 		next_button.text = "FINISH"
-		next_button.pressed.connect(show_final_victory)
+
+		next_button.pressed.connect(
+			show_final_victory
+		)
 
 	var levels_button = create_button(
 		"LEVEL SELECT",
@@ -920,16 +1182,29 @@ func show_completion_buttons():
 		16
 	)
 
-	levels_button.pressed.connect(show_level_select)
+	levels_button.pressed.connect(
+		show_level_select
+	)
 
+
+# =========================================================
+# NEXT LEVEL
+# =========================================================
 
 func go_to_next_level():
 
 	if current_level < TOTAL_LEVELS:
+
 		start_level(current_level + 1)
+
 	else:
+
 		show_final_victory()
 
+
+# =========================================================
+# FINAL VICTORY
+# =========================================================
 
 func show_final_victory():
 
@@ -950,7 +1225,7 @@ func show_final_victory():
 		Vector2(0, screen.y * 0.25 + 80),
 		Vector2(screen.x, 45),
 		19,
-		MUTED
+		GOLD
 	)
 
 	var menu_button = create_button(
@@ -960,7 +1235,9 @@ func show_final_victory():
 		20
 	)
 
-	menu_button.pressed.connect(show_main_menu)
+	menu_button.pressed.connect(
+		show_main_menu
+	)
 
 
 # =========================================================
@@ -977,13 +1254,22 @@ func undo_move():
 
 	var removed_cell = path.pop_back()
 
+	move_count = maxi(
+		0,
+		move_count - 1
+	)
+
 	var checkpoint = get_number(removed_cell)
 
 	if checkpoint > 0:
 		next_number = checkpoint
 
+	if path.is_empty():
+		timer_running = false
+
 	update_all_tiles()
 	update_progress()
+	update_timer_display()
 
 	update_status("CONTINUE YOUR PATH")
 
