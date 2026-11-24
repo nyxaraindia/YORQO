@@ -1,0 +1,14 @@
+78098b89c88a74ebe8c20117b8754620
+::res://::1795523917
+README.md::TextFile::-1::1795523572::0::1::::<><><>0<>0<><>::
+::res://assets/::1795523572
+::res://assets/audio/::1795523572
+::res://assets/fonts/::1795523572
+::res://assets/images/::1795523572
+::res://docs/::1795523572
+::res://docs/development/::1795523572
+day01.md::TextFile::-1::1795523572::0::1::::<><><>0<>0<><>::
+::res://scenes/::1795523739
+main.tscn::PackedScene::-1::1795523739::0::1::::<><><>0<>0<><>::res://scripts/main.gd
+::res://scripts/::1795523871
+main.gd::GDScript::7044796818523784360::1795523871::0::1::::<>Control<><>0<>0<><>::
