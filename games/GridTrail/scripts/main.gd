@@ -1,188 +1,622 @@
 
 extends Control
 
-# ==========================================
-# GRIDTRAIL - YORQO
-# Full Board Puzzle Prototype
-# ==========================================
+# =========================================================
+# GRIDTRAIL - 100 LEVEL NUMBER PATH PUZZLE
+# =========================================================
 
-const GRID_SIZE = 5
-const TILE_SIZE = 72
-const TILE_GAP = 8
+const TOTAL_LEVELS = 100
+const LEVELS_PER_STAGE = 20
 
-const COLOR_BACKGROUND = Color("#10111d")
-const COLOR_EMPTY = Color("#272a3c")
-const COLOR_PATH = Color("#7545d6")
-const COLOR_START = Color("#087f5b")
-const COLOR_FINISH = Color("#087ca5")
-const COLOR_NUMBER = Color("#ffffff")
-const COLOR_MUTED = Color("#a9a4c4")
+const BG_COLOR = Color("#10111d")
+const EMPTY_COLOR = Color("#272a3c")
+const PATH_COLOR = Color("#7545d6")
+const START_COLOR = Color("#087f5b")
+const FINISH_COLOR = Color("#087ca5")
+const CHECKPOINT_COLOR = Color("#39435e")
+const OBSTACLE_COLOR = Color("#11131b")
+const WHITE = Color("#ffffff")
+const MUTED = Color("#aaa6c2")
 
-var numbers = {
-	0: 1,
-	6: 2,
-	12: 3,
-	18: 4,
-	24: 5
-}
+var current_level = 1
+var unlocked_level = 1
 
+var grid_size = 5
+var checkpoint_count = 5
+var obstacle_count = 0
+
+var route = []
+var playable_path = []
+var path = []
+
+# Cell index -> checkpoint number
+var number_positions = {}
+
+# Cell index -> true
+var obstacle_cells = {}
+
+var tiles = []
 var board: GridContainer
-var tiles: Array[Button] = []
-var path: Array[int] = []
+
+var status_label: Label
+var progress_label: Label
 
 var next_number = 2
 var dragging = false
 var completed = false
 
-var status_label: Label
+var tile_size = 60
+var tile_gap = 6
 
+var save_file = ConfigFile.new()
+
+
+# =========================================================
+# START
+# =========================================================
 
 func _ready():
-	create_background()
-	create_interface()
-	create_board()
-	update_status("Start at number 1")
+	load_progress()
+	show_main_menu()
 
 
-# ==========================================
-# BACKGROUND
-# ==========================================
+# =========================================================
+# SAVE AND LOAD
+# =========================================================
+
+func load_progress():
+	var result = save_file.load("user://gridtrail_progress.cfg")
+
+	if result == OK:
+		unlocked_level = int(
+			save_file.get_value("progress", "unlocked_level", 1)
+		)
+
+	unlocked_level = clampi(unlocked_level, 1, TOTAL_LEVELS)
+
+
+func save_progress():
+	save_file.set_value(
+		"progress",
+		"unlocked_level",
+		unlocked_level
+	)
+
+	save_file.save("user://gridtrail_progress.cfg")
+
+
+# =========================================================
+# SCREEN MANAGEMENT
+# =========================================================
+
+func clear_screen():
+	for child in get_children():
+		remove_child(child)
+		child.queue_free()
+
+	tiles.clear()
+	board = null
+	status_label = null
+	progress_label = null
+
 
 func create_background():
-
 	var background = ColorRect.new()
-
-	background.color = COLOR_BACKGROUND
+	background.color = BG_COLOR
 	background.set_anchors_and_offsets_preset(
 		Control.PRESET_FULL_RECT
 	)
-
 	background.mouse_filter = Control.MOUSE_FILTER_IGNORE
-
 	add_child(background)
 
 
-# ==========================================
-# INTERFACE
-# ==========================================
+func create_label(
+	label_text: String,
+	position: Vector2,
+	label_size: Vector2,
+	font_size: int,
+	color: Color = WHITE
+) -> Label:
 
-func create_interface():
+	var label = Label.new()
 
-	var title = Label.new()
+	label.text = label_text
+	label.position = position
+	label.size = label_size
 
-	title.text = "GRIDTRAIL"
-	title.position = Vector2(0, 35)
-	title.size = Vector2(1280, 55)
+	label.add_theme_font_size_override(
+		"font_size",
+		font_size
+	)
 
-	title.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
-	title.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
+	label.add_theme_color_override(
+		"font_color",
+		color
+	)
 
-	title.add_theme_color_override("font_color", COLOR_NUMBER)
-	title.add_theme_font_size_override("font_size", 38)
+	label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	label.vertical_alignment = VERTICAL_ALIGNMENT_CENTER
 
-	add_child(title)
+	add_child(label)
 
-	var subtitle = Label.new()
+	return label
 
-	subtitle.text = "CONNECT • SOLVE • WIN"
-	subtitle.position = Vector2(0, 88)
-	subtitle.size = Vector2(1280, 30)
 
-	subtitle.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+func create_button(
+	button_text: String,
+	position: Vector2,
+	button_size: Vector2,
+	font_size: int = 20
+) -> Button:
 
-	subtitle.add_theme_color_override("font_color", COLOR_MUTED)
-	subtitle.add_theme_font_size_override("font_size", 15)
+	var button = Button.new()
 
-	add_child(subtitle)
+	button.text = button_text
+	button.position = position
+	button.size = button_size
 
-	status_label = Label.new()
+	button.add_theme_font_size_override(
+		"font_size",
+		font_size
+	)
 
-	status_label.position = Vector2(0, 165)
-	status_label.size = Vector2(1280, 35)
+	button.add_theme_color_override(
+		"font_color",
+		WHITE
+	)
 
-	status_label.horizontal_alignment = HORIZONTAL_ALIGNMENT_CENTER
+	button.add_theme_color_override(
+		"font_hover_color",
+		WHITE
+	)
 
-	status_label.add_theme_font_size_override("font_size", 20)
-	status_label.add_theme_color_override("font_color", COLOR_NUMBER)
+	button.add_theme_color_override(
+		"font_pressed_color",
+		WHITE
+	)
 
-	add_child(status_label)
+	var normal = StyleBoxFlat.new()
+	normal.bg_color = Color("#272a3c")
+	normal.set_corner_radius_all(10)
+	normal.set_border_width_all(1)
+	normal.border_color = Color("#55516e")
 
-	var restart_button = Button.new()
+	var hover = StyleBoxFlat.new()
+	hover.bg_color = Color("#40345e")
+	hover.set_corner_radius_all(10)
+	hover.set_border_width_all(1)
+	hover.border_color = Color("#9972e8")
 
-	restart_button.text = "RESTART"
-	restart_button.position = Vector2(480, 660)
-	restart_button.size = Vector2(140, 45)
+	button.add_theme_stylebox_override("normal", normal)
+	button.add_theme_stylebox_override("hover", hover)
+	button.add_theme_stylebox_override("pressed", hover)
 
-	restart_button.pressed.connect(restart_game)
+	add_child(button)
 
-	add_child(restart_button)
+	return button
 
-	var undo_button = Button.new()
 
-	undo_button.text = "UNDO"
-	undo_button.position = Vector2(660, 660)
-	undo_button.size = Vector2(140, 45)
+# =========================================================
+# MAIN MENU
+# =========================================================
+
+func show_main_menu():
+	clear_screen()
+	create_background()
+
+	var screen = get_viewport_rect().size
+
+	create_label(
+		"GRIDTRAIL",
+		Vector2(0, screen.y * 0.20),
+		Vector2(screen.x, 80),
+		52
+	)
+
+	create_label(
+		"CONNECT • SOLVE • WIN",
+		Vector2(0, screen.y * 0.20 + 75),
+		Vector2(screen.x, 40),
+		16,
+		MUTED
+	)
+
+	var play_button = create_button(
+		"PLAY",
+		Vector2(screen.x / 2 - 120, screen.y * 0.48),
+		Vector2(240, 60),
+		24
+	)
+
+	play_button.pressed.connect(
+		func():
+			start_level(unlocked_level)
+	)
+
+	var levels_button = create_button(
+		"LEVEL SELECT",
+		Vector2(screen.x / 2 - 120, screen.y * 0.48 + 80),
+		Vector2(240, 55),
+		20
+	)
+
+	levels_button.pressed.connect(show_level_select)
+
+	create_label(
+		"UNLOCKED: %d / %d" % [unlocked_level, TOTAL_LEVELS],
+		Vector2(0, screen.y * 0.48 + 155),
+		Vector2(screen.x, 35),
+		16,
+		MUTED
+	)
+
+
+# =========================================================
+# LEVEL SELECTION
+# =========================================================
+
+func show_level_select():
+	clear_screen()
+	create_background()
+
+	var screen = get_viewport_rect().size
+
+	create_label(
+		"SELECT LEVEL",
+		Vector2(0, 30),
+		Vector2(screen.x, 60),
+		34
+	)
+
+	var columns = 10
+	var button_size = 48
+	var gap = 10
+
+	var total_width = columns * button_size + (columns - 1) * gap
+	var start_x = (screen.x - total_width) / 2
+	var start_y = 120
+
+	for level in range(1, TOTAL_LEVELS + 1):
+
+		var row = int((level - 1) / columns)
+		var column = (level - 1) % columns
+
+		var position = Vector2(
+			start_x + column * (button_size + gap),
+			start_y + row * (button_size + gap)
+		)
+
+		var level_button = create_button(
+			str(level),
+			position,
+			Vector2(button_size, button_size),
+			17
+		)
+
+		if level <= unlocked_level:
+			level_button.disabled = false
+			level_button.pressed.connect(
+				start_level.bind(level)
+			)
+
+			if level == current_level:
+				level_button.modulate = Color("#b99aff")
+
+		else:
+			level_button.disabled = true
+			level_button.modulate = Color("#555566")
+
+	var back_button = create_button(
+		"BACK",
+		Vector2(screen.x / 2 - 100, screen.y - 65),
+		Vector2(200, 45),
+		18
+	)
+
+	back_button.pressed.connect(show_main_menu)
+
+
+# =========================================================
+# LEVEL CONFIGURATION
+# =========================================================
+
+func configure_level(level: int):
+	var stage = int((level - 1) / LEVELS_PER_STAGE)
+	var local_level = (level - 1) % LEVELS_PER_STAGE
+
+	grid_size = 5 + stage
+
+	checkpoint_count = min(5 + stage, 9)
+
+	obstacle_count = int(
+		round(
+			float(local_level) / 19.0 * (grid_size - 3)
+		)
+	)
+
+	# Updated tile size formula
+	tile_size = 72 - (stage * 7)
+
+	tile_gap = 6
+
+
+func get_difficulty_name() -> String:
+	var stage = int((current_level - 1) / LEVELS_PER_STAGE)
+
+	match stage:
+		0:
+			return "EASY"
+		1:
+			return "NORMAL"
+		2:
+			return "HARD"
+		3:
+			return "EXPERT"
+		4:
+			return "MASTER"
+
+	return "UNKNOWN"
+
+
+# =========================================================
+# LEVEL GENERATION
+# =========================================================
+
+func generate_level():
+	route.clear()
+	playable_path.clear()
+	number_positions.clear()
+	obstacle_cells.clear()
+
+	# Generate a snake-shaped route through the grid.
+	# Every cell is included exactly once.
+
+	for row in range(grid_size):
+
+		if row % 2 == 0:
+
+			for column in range(grid_size):
+				route.append(row * grid_size + column)
+
+		else:
+
+			for column in range(grid_size - 1, -1, -1):
+				route.append(row * grid_size + column)
+
+	var total_cells = grid_size * grid_size
+
+	var playable_count = total_cells - obstacle_count
+
+	# The playable route is the beginning of the snake route.
+	# The remaining cells become obstacles.
+
+	for i in range(playable_count):
+		playable_path.append(route[i])
+
+	for i in range(playable_count, total_cells):
+		obstacle_cells[route[i]] = true
+
+	# Assign checkpoint numbers to playable cells.
+	# The first checkpoint is at the beginning.
+	# The last checkpoint is at the end.
+
+	for number in range(1, checkpoint_count + 1):
+
+		var checkpoint_index = int(
+			round(
+				float(number - 1) *
+				float(playable_count - 1) /
+				float(checkpoint_count - 1)
+			)
+		)
+
+		var cell_index = playable_path[checkpoint_index]
+
+		number_positions[cell_index] = number
+
+
+# =========================================================
+# START A LEVEL
+# =========================================================
+
+func start_level(level: int):
+	if level < 1 or level > TOTAL_LEVELS:
+		return
+
+	if level > unlocked_level:
+		return
+
+	current_level = level
+
+	configure_level(current_level)
+	generate_level()
+
+	path.clear()
+
+	next_number = 2
+	dragging = false
+	completed = false
+
+	show_game_screen()
+
+
+# =========================================================
+# GAME SCREEN
+# =========================================================
+
+func show_game_screen():
+	clear_screen()
+	create_background()
+
+	var screen = get_viewport_rect().size
+
+	create_label(
+		"GRIDTRAIL",
+		Vector2(0, 8),
+		Vector2(screen.x, 45),
+		28
+	)
+
+	create_label(
+		"LEVEL %d  •  %s" % [
+			current_level,
+			get_difficulty_name()
+		],
+		Vector2(0, 52),
+		Vector2(screen.x, 35),
+		17,
+		MUTED
+	)
+
+	status_label = create_label(
+		"START AT NUMBER 1",
+		Vector2(0, 88),
+		Vector2(screen.x, 30),
+		16,
+		WHITE
+	)
+
+	progress_label = create_label(
+		"",
+		Vector2(0, 118),
+		Vector2(screen.x, 28),
+		15,
+		MUTED
+	)
+
+	create_board()
+
+	var button_y = screen.y - 65
+
+	var undo_button = create_button(
+		"UNDO",
+		Vector2(screen.x * 0.12, button_y),
+		Vector2(screen.x * 0.22, 45),
+		15
+	)
 
 	undo_button.pressed.connect(undo_move)
 
-	add_child(undo_button)
+	var restart_button = create_button(
+		"RESTART",
+		Vector2(screen.x * 0.39, button_y),
+		Vector2(screen.x * 0.22, 45),
+		15
+	)
+
+	restart_button.pressed.connect(restart_game)
+
+	var levels_button = create_button(
+		"LEVELS",
+		Vector2(screen.x * 0.66, button_y),
+		Vector2(screen.x * 0.22, 45),
+		15
+	)
+
+	levels_button.pressed.connect(show_level_select)
+
+	update_progress()
 
 
-# ==========================================
+# =========================================================
 # CREATE GRID
-# ==========================================
+# =========================================================
 
 func create_board():
-
 	board = GridContainer.new()
 
-	board.columns = GRID_SIZE
+	board.columns = grid_size
+	board.add_theme_constant_override(
+		"h_separation",
+		tile_gap
+	)
 
-	board.add_theme_constant_override("h_separation", TILE_GAP)
-	board.add_theme_constant_override("v_separation", TILE_GAP)
+	board.add_theme_constant_override(
+		"v_separation",
+		tile_gap
+	)
 
-	board.position = Vector2(436, 235)
+	var board_width = (
+		grid_size * tile_size +
+		(grid_size - 1) * tile_gap
+	)
+
+	var screen = get_viewport_rect().size
+
+	board.position = Vector2(
+		(screen.x - board_width) / 2,
+		(screen.y - board_width) / 2 + 35
+	)
 
 	add_child(board)
 
-	for index in range(GRID_SIZE * GRID_SIZE):
+	tiles.clear()
+
+	for index in range(grid_size * grid_size):
 
 		var tile = Button.new()
 
-		tile.custom_minimum_size = Vector2(TILE_SIZE, TILE_SIZE)
+		tile.custom_minimum_size = Vector2(
+			tile_size,
+			tile_size
+		)
 
-		tile.add_theme_font_size_override("font_size", 27)
+		tile.size = Vector2(
+			tile_size,
+			tile_size
+		)
 
-		tile.add_theme_color_override("font_color", COLOR_NUMBER)
-		tile.add_theme_color_override("font_hover_color", COLOR_NUMBER)
-		tile.add_theme_color_override("font_pressed_color", COLOR_NUMBER)
-		tile.add_theme_color_override("font_disabled_color", COLOR_NUMBER)
+		tile.focus_mode = Control.FOCUS_NONE
 
-		tile.text = str(get_number(index)) if get_number(index) > 0 else ""
+		tile.add_theme_font_size_override(
+			"font_size",
+			maxi(14, int(tile_size * 0.35))
+		)
+
+		tile.add_theme_color_override(
+			"font_color",
+			WHITE
+		)
+
+		tile.add_theme_color_override(
+			"font_disabled_color",
+			Color("#999999")
+		)
+
+		if obstacle_cells.has(index):
+
+			tile.text = "X"
+			tile.disabled = true
+
+		else:
+
+			# Display the checkpoint number immediately.
+			tile.text = str(get_number(index)) if get_number(index) > 0 else ""
 
 		board.add_child(tile)
-
 		tiles.append(tile)
-
-		tile.gui_input.connect(_on_tile_input.bind(index))
 
 		update_tile(index)
 
+	update_all_tiles()
 
-# ==========================================
-# NUMBER INFORMATION
-# ==========================================
+
+# =========================================================
+# CHECKPOINT NUMBER LOOKUP
+# =========================================================
 
 func get_number(index: int) -> int:
+	if number_positions.has(index):
+		return int(number_positions[index])
 
-	return numbers.get(index, 0)
+	return 0
 
 
-# ==========================================
+# =========================================================
 # MOUSE AND TOUCH INPUT
-# ==========================================
+# =========================================================
 
-func _on_tile_input(event: InputEvent, index: int):
+func _input(event):
 
 	if completed:
 		return
@@ -194,237 +628,369 @@ func _on_tile_input(event: InputEvent, index: int):
 			if event.pressed:
 
 				dragging = true
-				try_add_cell(index)
+
+				var index = get_tile_at_position(
+					get_global_mouse_position()
+				)
+
+				if index != -1:
+					try_add_cell(index)
 
 			else:
-
 				dragging = false
 
 	elif event is InputEventMouseMotion:
 
 		if dragging:
-			try_add_cell(index)
+
+			var index = get_tile_at_position(
+				get_global_mouse_position()
+			)
+
+			if index != -1:
+				try_add_cell(index)
 
 	elif event is InputEventScreenTouch:
 
 		if event.pressed:
 
 			dragging = true
-			try_add_cell(index)
+
+			var index = get_tile_at_position(
+				event.position
+			)
+
+			if index != -1:
+				try_add_cell(index)
 
 		else:
-
 			dragging = false
 
 	elif event is InputEventScreenDrag:
 
 		if dragging:
-			try_add_cell(index)
+
+			var index = get_tile_at_position(
+				event.position
+			)
+
+			if index != -1:
+				try_add_cell(index)
 
 
-# ==========================================
-# ADD CELL TO PATH
-# ==========================================
+func get_tile_at_position(position: Vector2) -> int:
+
+	for i in range(tiles.size()):
+
+		var tile = tiles[i]
+
+		if tile.get_global_rect().has_point(position):
+			return i
+
+	return -1
+
+
+# =========================================================
+# ADD A CELL TO THE PATH
+# =========================================================
 
 func try_add_cell(index: int):
 
+	if completed:
+		return
+
+	if index < 0 or index >= tiles.size():
+		return
+
+	# Obstacles cannot be used.
+	if obstacle_cells.has(index):
+		return
+
+	# A cell cannot be visited twice.
 	if path.has(index):
 		return
 
+	# The first cell must be checkpoint 1.
 	if path.is_empty():
 
 		if get_number(index) != 1:
-			update_status("Start at number 1")
 			return
 
 		path.append(index)
 
 		update_all_tiles()
-		update_status("Connect number 2")
+		update_progress()
 
 		return
 
-	var previous_index = path[-1]
+	var previous_cell = path[path.size() - 1]
 
-	if not is_adjacent(previous_index, index):
+	# Only up, down, left and right are allowed.
+	if not is_adjacent(previous_cell, index):
 		return
 
-	var number = get_number(index)
+	# Checkpoint numbers must be visited in order.
+	var checkpoint = get_number(index)
 
-	if number > 0 and number != next_number:
+	if checkpoint > 0:
 
-		update_status("Connect number " + str(next_number))
-		return
+		if checkpoint != next_number:
+			return
+
+		next_number += 1
 
 	path.append(index)
 
-	if number > 0:
-		next_number += 1
-
 	update_all_tiles()
+	update_progress()
 
-	if next_number > 5:
-		check_completion()
-	else:
-		update_status(
-			"Connect number " + str(next_number)
-		)
+	check_completion()
 
 
-# ==========================================
-# FOUR-DIRECTION MOVEMENT
-# ==========================================
+# =========================================================
+# ADJACENT MOVEMENT
+# =========================================================
 
 func is_adjacent(a: int, b: int) -> bool:
 
-	var row_a = int(a / GRID_SIZE)
-	var col_a = a % GRID_SIZE
+	var row_a = int(a / grid_size)
+	var col_a = a % grid_size
 
-	var row_b = int(b / GRID_SIZE)
-	var col_b = b % GRID_SIZE
+	var row_b = int(b / grid_size)
+	var col_b = b % grid_size
 
-	return abs(row_a - row_b) + abs(col_a - col_b) == 1
-
-
-# ==========================================
-# CHECK ALL SQUARES
-# ==========================================
-
-func check_completion():
-
-	if path.size() == GRID_SIZE * GRID_SIZE:
-
-		completed = true
-		dragging = false
-
-		update_status("YOU WIN! All 25 squares completed!")
-
-	else:
-
-		update_status(
-			"Number 5 reached! Fill all " +
-			str(GRID_SIZE * GRID_SIZE) +
-            " squares before winning."
-		)
+	return (
+		abs(row_a - row_b) +
+		abs(col_a - col_b)
+	) == 1
 
 
-# ==========================================
-# TILE APPEARANCE
-# ==========================================
+# =========================================================
+# UPDATE TILE COLORS
+# =========================================================
 
-func update_tile(index: int):
-
-	var tile = tiles[index]
-	var number = get_number(index)
-
-	tile.add_theme_stylebox_override(
-		"normal",
-		create_tile_style(index)
-	)
-
-	tile.add_theme_stylebox_override(
-		"hover",
-		create_tile_style(index)
-	)
-
-	tile.add_theme_stylebox_override(
-		"pressed",
-		create_tile_style(index)
-	)
-
-	tile.add_theme_stylebox_override(
-		"disabled",
-		create_tile_style(index)
-	)
-
-	tile.add_theme_color_override("font_color", COLOR_NUMBER)
-	tile.add_theme_color_override("font_disabled_color", COLOR_NUMBER)
-
-	tile.text = str(number) if number > 0 else ""
-
-
-func create_tile_style(index: int) -> StyleBoxFlat:
+func make_tile_style(color: Color) -> StyleBoxFlat:
 
 	var style = StyleBoxFlat.new()
 
-	if path.has(index):
-
-		style.bg_color = COLOR_PATH
-
-	elif get_number(index) == 1:
-
-		style.bg_color = COLOR_START
-
-	elif get_number(index) == 5:
-
-		style.bg_color = COLOR_FINISH
-
-	else:
-
-		style.bg_color = COLOR_EMPTY
-
-	style.set_corner_radius_all(10)
+	style.bg_color = color
+	style.set_corner_radius_all(8)
 
 	return style
 
 
+func update_tile(index: int):
+
+	if index < 0 or index >= tiles.size():
+		return
+
+	var tile = tiles[index]
+
+	if obstacle_cells.has(index):
+
+		tile.text = "X"
+		tile.add_theme_stylebox_override(
+			"normal",
+			make_tile_style(OBSTACLE_COLOR)
+		)
+
+		return
+
+	var checkpoint = get_number(index)
+
+	# Always show checkpoint numbers.
+	if checkpoint > 0:
+		tile.text = str(checkpoint)
+	else:
+		tile.text = ""
+
+	var color = EMPTY_COLOR
+
+	if path.has(index):
+		color = PATH_COLOR
+
+	if checkpoint == 1:
+		color = START_COLOR
+
+	if checkpoint == checkpoint_count:
+		color = FINISH_COLOR
+
+	if path.has(index) and checkpoint > 0:
+		color = PATH_COLOR
+
+	tile.add_theme_stylebox_override(
+		"normal",
+		make_tile_style(color)
+	)
+
+	tile.add_theme_stylebox_override(
+		"hover",
+		make_tile_style(color.lightened(0.15))
+	)
+
+	tile.add_theme_stylebox_override(
+		"pressed",
+		make_tile_style(color.darkened(0.15))
+	)
+
+
 func update_all_tiles():
 
-	for index in range(tiles.size()):
-		update_tile(index)
+	for i in range(tiles.size()):
+		update_tile(i)
 
 
-# ==========================================
-# STATUS
-# ==========================================
+# =========================================================
+# PROGRESS
+# =========================================================
+
+func update_progress():
+
+	if progress_label == null:
+		return
+
+	progress_label.text = "FILLED: %d / %d     NEXT: %d" % [
+		path.size(),
+		playable_path.size(),
+		next_number
+	]
+
 
 func update_status(message: String):
 
-	status_label.text = message
+	if status_label != null:
+		status_label.text = message
 
 
-# ==========================================
-# UNDO
-# ==========================================
+# =========================================================
+# COMPLETION CHECK
+# =========================================================
 
-func undo_move():
+func check_completion():
 
-	if completed or path.is_empty():
+	if path.size() != playable_path.size():
 		return
 
-	var removed_index = path.pop_back()
+	if next_number <= checkpoint_count:
+		return
 
-	var number = get_number(removed_index)
-
-	if number > 0:
-		next_number = number
-
+	completed = true
 	dragging = false
 
-	update_all_tiles()
+	update_status("LEVEL COMPLETED!")
 
-	if path.is_empty():
+	if current_level < TOTAL_LEVELS:
 
-		update_status("Start at number 1")
+		if current_level >= unlocked_level:
+			unlocked_level = current_level + 1
+
+		save_progress()
+
+	show_completion_buttons()
+
+
+# =========================================================
+# COMPLETION SCREEN BUTTONS
+# =========================================================
+
+func show_completion_buttons():
+
+	var screen = get_viewport_rect().size
+
+	var next_button = create_button(
+		"NEXT LEVEL",
+		Vector2(screen.x / 2 - 110, screen.y - 125),
+		Vector2(220, 48),
+		18
+	)
+
+	if current_level < TOTAL_LEVELS:
+
+		next_button.pressed.connect(go_to_next_level)
 
 	else:
 
-		update_status("Connect number " + str(next_number))
+		next_button.text = "FINISH"
+		next_button.pressed.connect(show_final_victory)
+
+	var levels_button = create_button(
+		"LEVEL SELECT",
+		Vector2(screen.x / 2 - 110, screen.y - 70),
+		Vector2(220, 42),
+		16
+	)
+
+	levels_button.pressed.connect(show_level_select)
 
 
-# ==========================================
-# RESTART
-# ==========================================
+func go_to_next_level():
 
-func restart_game():
+	if current_level < TOTAL_LEVELS:
+		start_level(current_level + 1)
+	else:
+		show_final_victory()
 
-	path.clear()
 
-	next_number = 2
+func show_final_victory():
 
-	dragging = false
-	completed = false
+	clear_screen()
+	create_background()
+
+	var screen = get_viewport_rect().size
+
+	create_label(
+		"YOU DID IT!",
+		Vector2(0, screen.y * 0.25),
+		Vector2(screen.x, 80),
+		42
+	)
+
+	create_label(
+		"ALL 100 LEVELS COMPLETED",
+		Vector2(0, screen.y * 0.25 + 80),
+		Vector2(screen.x, 45),
+		19,
+		MUTED
+	)
+
+	var menu_button = create_button(
+		"MAIN MENU",
+		Vector2(screen.x / 2 - 110, screen.y * 0.60),
+		Vector2(220, 55),
+		20
+	)
+
+	menu_button.pressed.connect(show_main_menu)
+
+
+# =========================================================
+# UNDO
+# =========================================================
+
+func undo_move():
+
+	if completed:
+		return
+
+	if path.is_empty():
+		return
+
+	var removed_cell = path.pop_back()
+
+	var checkpoint = get_number(removed_cell)
+
+	if checkpoint > 0:
+		next_number = checkpoint
 
 	update_all_tiles()
+	update_progress()
 
-	update_status("Start at number 1")
+	update_status("CONTINUE YOUR PATH")
+
+
+# =========================================================
+# RESTART
+# =========================================================
+
+func restart_game():
+	start_level(current_level)
